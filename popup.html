@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      width: 320px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      background: #0f0f1a;
+      color: #e0e0e0;
+      font-size: 13px;
+      padding: 16px;
+    }
+    h1 {
+      font-size: 16px;
+      font-weight: 600;
+      margin-bottom: 12px;
+      color: #fff;
+    }
+    .stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+      margin-bottom: 16px;
+    }
+    .stat-card {
+      background: #1a1a2e;
+      border-radius: 8px;
+      padding: 10px 12px;
+    }
+    .stat-label { color: #888; font-size: 11px; margin-bottom: 4px; }
+    .stat-value { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .stat-value.credits { color: #66bb6a; }
+    .stat-value.cost { color: #ffb74d; }
+    .stat-value.tokens { color: #4fc3f7; }
+
+    h2 {
+      font-size: 13px;
+      color: #888;
+      margin-bottom: 8px;
+      font-weight: 500;
+    }
+    .history {
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    .history-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 6px 8px;
+      background: #1a1a2e;
+      border-radius: 6px;
+      margin-bottom: 4px;
+      font-size: 12px;
+    }
+    .history-model {
+      background: #2a2a3e;
+      padding: 1px 6px;
+      border-radius: 4px;
+      color: #aaa;
+      font-size: 11px;
+    }
+    .history-credits { color: #66bb6a; font-weight: 500; }
+    .history-time { color: #555; font-size: 10px; }
+
+    .actions {
+      margin-top: 12px;
+      display: flex;
+      gap: 8px;
+    }
+    button {
+      flex: 1;
+      padding: 8px;
+      border: 1px solid #333;
+      border-radius: 6px;
+      background: #1a1a2e;
+      color: #e0e0e0;
+      cursor: pointer;
+      font-size: 12px;
+    }
+    button:hover { background: #2a2a3e; }
+    button.danger { border-color: #c62828; color: #ef5350; }
+    button.danger:hover { background: #2a1a1a; }
+
+    .empty { color: #555; text-align: center; padding: 20px; }
+  </style>
+</head>
+<body>
+  <h1>Credit Catch</h1>
+
+  <div class="stats">
+    <div class="stat-card">
+      <div class="stat-label">Today Credits</div>
+      <div class="stat-value credits" id="total-credits">0.00</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Est. Cost (USD)</div>
+      <div class="stat-value cost" id="total-cost">$0.00</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Messages</div>
+      <div class="stat-value tokens" id="total-messages">0</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-label">Avg / Msg</div>
+      <div class="stat-value tokens" id="avg-credits">0.00</div>
+    </div>
+  </div>
+
+  <h2>Recent Messages</h2>
+  <div class="history" id="history"></div>
+
+  <div class="actions">
+    <button id="export-btn">Export CSV</button>
+    <button id="reset-btn" class="danger">Reset Today</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>
