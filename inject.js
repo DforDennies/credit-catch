@@ -7,6 +7,13 @@
   let currentConvId = null;
   let activePollId = 0;
   const pageLoadTime = Date.now();
+  const tabId = Math.random().toString(36).slice(2, 10);
+
+  const healthStatus = { cookie: 'pending', auth: 'pending', balance: 'pending' };
+
+  function postHealth() {
+    window.postMessage({ type: '__CREDIT_CATCH_HEALTH__', payload: { ...healthStatus } }, '*');
+  }
 
   function getConversationId() {
     const match = location.pathname.match(/\/c\/([a-f0-9-]+)/);
@@ -19,10 +26,17 @@
     if (workspaceId) return workspaceId;
     try {
       const match = document.cookie.match(/(^|;\s*)_account=([^;]+)/);
-      if (match) workspaceId = match[2];
+      if (match) {
+        workspaceId = match[2];
+        healthStatus.cookie = 'ok';
+      } else {
+        healthStatus.cookie = 'fail';
+      }
     } catch (e) {
+      healthStatus.cookie = 'fail';
       console.warn('[Credit Catch] Cookie read error:', e.message);
     }
+    postHealth();
     return workspaceId;
   }
 
@@ -33,13 +47,21 @@
       if (resp.ok) {
         const data = await resp.json();
         authToken = data.accessToken || data.access_token;
-        if (!authToken) console.warn('[Credit Catch] No accessToken in session response');
+        if (!authToken) {
+          healthStatus.auth = 'fail';
+          console.warn('[Credit Catch] No accessToken in session response');
+        } else {
+          healthStatus.auth = 'ok';
+        }
       } else {
+        healthStatus.auth = 'fail';
         console.warn('[Credit Catch] Session API status:', resp.status);
       }
     } catch (e) {
+      healthStatus.auth = 'fail';
       console.warn('[Credit Catch] Session API error:', e.message);
     }
+    postHealth();
     return authToken;
   }
 
@@ -68,17 +90,29 @@
           credentials: 'include',
           headers: { 'Authorization': 'Bearer ' + newToken },
         });
-        if (!retry.ok) return null;
+        if (!retry.ok) {
+          healthStatus.balance = 'fail';
+          postHealth();
+          return null;
+        }
         const d = await retry.json();
+        healthStatus.balance = 'ok';
+        postHealth();
         return parseFloat(d.balance);
       }
       if (!resp.ok) {
+        healthStatus.balance = 'fail';
+        postHealth();
         console.warn('[Credit Catch] Balance API status:', resp.status);
         return null;
       }
       const data = await resp.json();
+      healthStatus.balance = 'ok';
+      postHealth();
       return parseFloat(data.balance);
     } catch (e) {
+      healthStatus.balance = 'fail';
+      postHealth();
       console.warn('[Credit Catch] Balance fetch error:', e.message);
       return null;
     }
@@ -112,9 +146,47 @@
     return null;
   }
 
+  function extractModelFromStream(response, url) {
+    if (!response.body) return;
+    try {
+      const [stream1, stream2] = response.body.tee();
+      const reader = stream2.getReader();
+      const decoder = new TextDecoder();
+      (async () => {
+        let buf = '';
+        try {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            buf += decoder.decode(value, { stream: true });
+          }
+        } catch {}
+        const lines = buf.split('\n');
+        for (const line of lines) {
+          if (line.startsWith('data: ') && line !== 'data: [DONE]') {
+            try {
+              const d = JSON.parse(line.slice(6));
+              if (d.type === 'server_ste_metadata' && d.metadata?.model_slug) {
+                lastModel = d.metadata.model_slug;
+              }
+            } catch {}
+          }
+        }
+      })();
+      return new Response(stream1, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: response.headers,
+      });
+    } catch {
+      return response;
+    }
+  }
+
   window.fetch = async function (...args) {
     const request = args[0];
     const url = typeof request === 'string' ? request : request?.url;
+    const method = (args[1]?.method || (typeof request !== 'string' ? request?.method : 'GET') || 'GET').toUpperCase();
     const response = await _fetch.apply(this, args);
     if (!url) return response;
 
@@ -129,6 +201,11 @@
         const data = await clone.json();
         if (data.accessToken) authToken = data.accessToken;
       } catch {}
+    }
+
+    // Intercept conversation stream to extract model_slug
+    if (url && method === 'POST' && url.includes('/conversation') && !url.includes('prepare') && !url.includes('conversations') && response.ok && response.body) {
+      return extractModelFromStream(response, url) || response;
     }
 
     // Conversation prepare: snapshot balance before message
@@ -152,12 +229,15 @@
         }
       }
 
-      console.log('[Credit Catch] Prepare — model:', lastModel, 'conv:', currentConvId, 'before:', snapshot?.toFixed(4));
+      console.log('[Credit Catch] Prepare — model:', lastModel, 'conv:', currentConvId, 'before:', snapshot?.toFixed(4), 'tab:', tabId);
 
       // Cancel any previous poll and start a new one
       activePollId++;
       const myPollId = activePollId;
       pendingConversation = true;
+
+      // Claim this poll window so other tabs know a poll is active
+      window.postMessage({ type: '__CREDIT_CATCH_POLL_LOCK__', payload: { tabId, timestamp: Date.now() } }, '*');
 
       setTimeout(() => pollBalanceAfter(lastModel, snapshot, myPollId), 3000);
     }
@@ -229,6 +309,7 @@
             balance_after: after,
             source: 'balance_delta',
             conversationId: currentConvId || getConversationId(),
+            tabId,
           },
         }, '*');
         balanceBefore = after;
@@ -259,6 +340,6 @@
     }
   }, 500);
 
-  console.log('[Credit Catch] Interceptor v12 ready');
+  console.log('[Credit Catch] Interceptor v13 ready (tab:', tabId, ')');
   window.postMessage({ type: '__CREDIT_CATCH_READY__' }, '*');
 })();

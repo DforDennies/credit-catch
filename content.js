@@ -13,6 +13,8 @@
   let currentConvCredits = 0;
   let currentConvMessages = 0;
   let currentConvId = null;
+  let healthStatus = { cookie: 'pending', auth: 'pending', balance: 'pending' };
+  const LOCK_KEY = 'creditCatchPollLock';
 
   function getConvIdFromUrl() {
     const match = location.pathname.match(/\/c\/([a-f0-9-]+)/);
@@ -132,8 +134,21 @@
         #credit-catch-widget .cc-minimize { cursor: pointer; opacity: 0.5; font-size: 14px; }
         #credit-catch-widget .cc-minimize:hover { opacity: 1; }
         #credit-catch-widget.cc-minimized .cc-body,
-        #credit-catch-widget.cc-minimized .cc-latest { display: none; }
+        #credit-catch-widget.cc-minimized .cc-latest,
+        #credit-catch-widget.cc-minimized .cc-health { display: none; }
         #credit-catch-widget.cc-minimized { min-width: auto; }
+        #credit-catch-widget .cc-health {
+          margin-top: 6px; padding-top: 6px; border-top: 1px solid #333;
+          font-size: 11px;
+        }
+        #credit-catch-widget .cc-health-row {
+          display: flex; justify-content: space-between; padding: 1px 0;
+        }
+        #credit-catch-widget .cc-health-label { color: #666; }
+        #credit-catch-widget .cc-health-status { font-weight: 500; }
+        #credit-catch-widget .cc-health-status.ok { color: #66bb6a; }
+        #credit-catch-widget .cc-health-status.fail { color: #ef5350; }
+        #credit-catch-widget .cc-health-status.pending { color: #ffb74d; }
       </style>
       <div class="cc-header">
         <span class="cc-title">Credit Catch</span>
@@ -168,6 +183,20 @@
         <div class="cc-row">
           <span class="cc-label">Balance</span>
           <span class="cc-value" id="cc-balance">--</span>
+        </div>
+      </div>
+      <div class="cc-health" id="cc-health">
+        <div class="cc-health-row">
+          <span class="cc-health-label">Cookie</span>
+          <span class="cc-health-status pending" id="cc-h-cookie">...</span>
+        </div>
+        <div class="cc-health-row">
+          <span class="cc-health-label">Auth Token</span>
+          <span class="cc-health-status pending" id="cc-h-auth">...</span>
+        </div>
+        <div class="cc-health-row">
+          <span class="cc-health-label">Balance API</span>
+          <span class="cc-health-status pending" id="cc-h-balance">...</span>
         </div>
       </div>
       <div class="cc-latest" id="cc-latest">Waiting for first message...</div>
@@ -278,16 +307,53 @@
     updateWidget();
   }
 
+  function updateHealth(status) {
+    healthStatus = status;
+    const icons = { ok: '✅', fail: '❌', pending: '⏳' };
+    const labels = { ok: 'OK', fail: 'Failed', pending: 'Checking...' };
+    for (const key of ['cookie', 'auth', 'balance']) {
+      const el = document.getElementById(`cc-h-${key}`);
+      if (el) {
+        el.textContent = `${icons[status[key]] || '❓'} ${labels[status[key]] || status[key]}`;
+        el.className = `cc-health-status ${status[key]}`;
+      }
+    }
+    const healthEl = document.getElementById('cc-health');
+    if (healthEl && status.cookie === 'ok' && status.auth === 'ok' && status.balance === 'ok') {
+      setTimeout(() => { healthEl.style.display = 'none'; }, 5000);
+    }
+  }
+
+  function handlePollLock(payload) {
+    chrome.storage.local.set({ [LOCK_KEY]: { tabId: payload.tabId, timestamp: payload.timestamp } });
+  }
+
   window.addEventListener('message', (e) => {
     if (e.source !== window) return;
     if (e.data?.type === '__CREDIT_CATCH__') {
-      handleCreditCatch(e.data.payload);
+      chrome.storage.local.get(LOCK_KEY, (result) => {
+        const lock = result[LOCK_KEY];
+        if (lock && e.data.payload.tabId && lock.tabId !== e.data.payload.tabId) {
+          const age = Date.now() - (lock.timestamp || 0);
+          if (age < 60000) {
+            console.log('[Credit Catch] Ignoring credit from different tab (lock held by', lock.tabId, ')');
+            return;
+          }
+        }
+        handleCreditCatch(e.data.payload);
+      });
     }
     if (e.data?.type === '__CREDIT_CATCH_BALANCE__') {
       handleBalance(e.data.payload);
     }
     if (e.data?.type === '__CREDIT_CATCH_CONV_CHANGE__') {
       handleConvChange(e.data.payload);
+    }
+    if (e.data?.type === '__CREDIT_CATCH_HEALTH__') {
+      updateHealth(e.data.payload);
+    }
+    if (e.data?.type === '__CREDIT_CATCH_POLL_LOCK__') {
+      handlePollLock(e.data.payload);
     }
     if (e.data?.type === '__CREDIT_CATCH_READY__') {
       console.log('[Credit Catch] Interceptor ready');
